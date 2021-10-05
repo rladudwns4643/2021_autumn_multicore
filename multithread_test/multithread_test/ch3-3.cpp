@@ -16,8 +16,8 @@ int error_cnt = 0;
 void Thread1() {
 	for (int i = 0; i < CNT / 2; ++i) {
 		*bound = -(1 + *bound);
-		done = true;
 	}
+	done = true;
 }
 
 void Thread2() {
@@ -38,5 +38,3 @@ int main() {
 	cout << "Tot: " << error_cnt << endl;
 	delete bound;
 }
-
-//ÇÏ´ÂÁß
