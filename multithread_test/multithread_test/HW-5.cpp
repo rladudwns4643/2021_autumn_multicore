@@ -65,7 +65,7 @@ public:
 		return !pred->removed && !curr->removed && pred->next == curr;
 	}
 
-	bool Add(int key){
+	bool Add(int key) {
 		while (true) {
 			NODE* pred, * cur;
 			pred = &head;
@@ -77,18 +77,12 @@ public:
 			pred->Lock();
 			cur->Lock();
 			while (validate(pred, cur)) {
-				if (cur->key == key && !cur->removed) {
+				if (cur->key == key) {
 					pred->unLock();
 					cur->unLock();
 					return false;
 				}
 				else {
-					if (cur->removed) {
-						cur->removed = false;
-						pred->unLock();
-						cur->unLock();
-						return true;
-					}
 					NODE* node = new NODE(key);
 					node->next = cur;
 					atomic_thread_fence(memory_order_seq_cst);

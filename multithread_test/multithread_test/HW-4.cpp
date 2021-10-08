@@ -1,9 +1,9 @@
 /*
-release_x64_lazy_synchronization
-1: 1870
-2: 1081
-4: 647
-8: 447
+release_x64_optimistic_synchronization
+1: 3114
+2: 1852
+4: 1144
+8: 817
 */
 
 #include <iostream>
@@ -17,18 +17,19 @@ using namespace chrono;
 
 const int THREAD_COUNT = 8;
 
+
 class null_mutex {
 public:
 	void lock() {};
 	void unlock() {};
 };
 
+
 class NODE {
 public:
 	int key;
-	NODE* volatile next;
+	NODE* next;
 	mutex node_lock;
-	bool removed = false;
 
 	NODE() : next(nullptr) {};
 	NODE(int key_val) : key(key_val), next(nullptr) {};
@@ -41,16 +42,16 @@ public:
 	~NODE() {};
 };
 
-class Z_SET {
+class O_SET {
 	NODE head, tail;
 	mutex g_lock;
 public:
-	Z_SET() {
+	O_SET() {
 		head.key = 0x80000000;
 		tail.key = 0x7FFFFFFF;
 		head.next = &tail;
 	}
-	~Z_SET() {};
+	~O_SET() {};
 
 	void Init() {
 		NODE* ptr;
@@ -62,10 +63,15 @@ public:
 	}
 
 	bool validate(NODE* pred, NODE* curr) {
-		return !pred->removed && !curr->removed && pred->next == curr;
+		NODE* n = &head;
+		while (n->key <= pred->key) {
+			if (n == pred) return pred->next == curr;
+			n = n->next;
+		}
+		return false;
 	}
 
-	bool Add(int key){
+	bool Add(int key) {
 		while (true) {
 			NODE* pred, * cur;
 			pred = &head;
@@ -77,21 +83,14 @@ public:
 			pred->Lock();
 			cur->Lock();
 			while (validate(pred, cur)) {
-				if (cur->key == key && !cur->removed) {
+				if (cur->key == key) {
 					pred->unLock();
 					cur->unLock();
 					return false;
 				}
 				else {
-					if (cur->removed) {
-						cur->removed = false;
-						pred->unLock();
-						cur->unLock();
-						return true;
-					}
 					NODE* node = new NODE(key);
 					node->next = cur;
-					atomic_thread_fence(memory_order_seq_cst);
 					pred->next = node;
 					pred->unLock();
 					cur->unLock();
@@ -120,8 +119,6 @@ public:
 					return false;
 				}
 				else {
-					cur->removed = true;
-					atomic_thread_fence(memory_order_seq_cst);
 					pred->next = cur->next;
 					pred->unLock();
 					cur->unLock();
@@ -133,11 +130,31 @@ public:
 		}
 	}
 	bool Contains(int key) {
-		NODE* curr = &head;
-		while (curr->key < key) {
-			curr = curr->next;
+		while (true) {
+			NODE* pred, * cur;
+			pred = &head;
+			cur = pred->next;
+			while (cur->key < key) {
+				pred = cur;
+				cur = cur->next;
+			}
+			pred->Lock();
+			cur->Lock();
+			while (validate(pred, cur)) {
+				if (cur->key != key) {
+					pred->unLock();
+					cur->unLock();
+					return false;
+				}
+				else {
+					pred->unLock();
+					cur->unLock();
+					return true;
+				}
+			}
+			pred->unLock();
+			cur->unLock();
 		}
-		return curr->key == key && !curr->removed;
 	}
 	void Verify() {
 		NODE* p = head.next;
@@ -150,7 +167,7 @@ public:
 	}
 };
 
-Z_SET myset;
+O_SET myset;
 void Benchmark(int num_threads) {
 	const int NUM_TEST = 4'000'000;
 	const int RANGE = 1000;
