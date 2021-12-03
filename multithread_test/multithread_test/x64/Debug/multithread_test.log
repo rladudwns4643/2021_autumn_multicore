@@ -1,2 +1,6 @@
 ﻿  main.cpp
+D:\OneDrive\Project\2021_autumn_multicore\multithread_test\multithread_test\main.cpp(66,1): warning C4305: '=': 'unsigned __int64'에서 'int'(으)로 잘립니다.
+D:\OneDrive\Project\2021_autumn_multicore\multithread_test\multithread_test\main.cpp(66,14): warning C4309: '=': 상수 값이 잘립니다.
+D:\OneDrive\Project\2021_autumn_multicore\multithread_test\multithread_test\main.cpp(67,1): warning C4305: '=': '__int64'에서 'int'(으)로 잘립니다.
+D:\OneDrive\Project\2021_autumn_multicore\multithread_test\multithread_test\main.cpp(67,14): warning C4309: '=': 상수 값이 잘립니다.
   multithread_test.vcxproj -> D:\OneDrive\Project\2021_autumn_multicore\multithread_test\x64\Debug\multithread_test.exe

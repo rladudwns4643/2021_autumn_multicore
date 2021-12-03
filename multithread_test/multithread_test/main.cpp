@@ -1,9 +1,51 @@
 /*
-release_x64_lazy_synchronization
-1: 1870
-2: 1081
-4: 647
-8: 447
+release_x64_coarse_grained_set
+1: 841
+2: 858
+4: 958
+8: 1155
+*/
+/*
+release_x64_coarse_grained_rw_lock_set (benchmark: contains() 33%, range: 1000)
+1: 788
+2: 816
+4: 918
+8: 1095
+*/ 
+/*
+release_x64_coarse_grained_rw_lock_set (benchmark: contains() 60%, range: 1000)
+1: 555
+2: 570
+4: 632
+8: 780
+*/
+/*
+release_x64_coarse_grained_rw_lock_set (benchmark: contains() 80%, range: 1000)
+1: 331
+2: 382
+4: 415
+8: 511
+*/
+/*
+release_x64_coarse_grained_rw_lock_set (benchmark: contains() 98%, range: 2000)
+1: 145
+2: 137
+4: 148
+8: 187
+*/
+/*
+release_x64_coarse_grained_rw_lock_set (benchmark: contains() 98%, range: 2000)
+1: 185
+2: 175
+4: 178
+8: 227
+*/
+/*
+release_x64_coarse_grained_rw_lock_set (benchmark: contains() 98%, range: 4000)
+1: 292
+2: 276
+4: 282
+8: 262
 */
 
 #include <iostream>
@@ -11,11 +53,13 @@ release_x64_lazy_synchronization
 #include <thread>
 #include <vector>
 #include <chrono>
+#include <shared_mutex>
 
 using namespace std;
 using namespace chrono;
 
 const int THREAD_COUNT = 8;
+
 
 class null_mutex {
 public:
@@ -26,31 +70,23 @@ public:
 class NODE {
 public:
 	int key;
-	NODE* volatile next;
-	mutex node_lock;
-	bool removed = false;
+	NODE* next;
 
 	NODE() : next(nullptr) {};
 	NODE(int key_val) : key(key_val), next(nullptr) {};
-	void Lock() {
-		node_lock.lock();
-	}
-	void unLock() {
-		node_lock.unlock();
-	}
 	~NODE() {};
 };
 
-class Z_SET {
+class C_SET {
 	NODE head, tail;
-	mutex g_lock;
+	shared_mutex g_lock;
 public:
-	Z_SET() {
+	C_SET() {
 		head.key = 0x80000000;
 		tail.key = 0x7FFFFFFF;
 		head.next = &tail;
 	}
-	~Z_SET() {};
+	~C_SET() {};
 
 	void Init() {
 		NODE* ptr;
@@ -61,83 +97,62 @@ public:
 		}
 	}
 
-	bool validate(NODE* pred, NODE* curr) {
-		return !pred->removed && !curr->removed && pred->next == curr;
-	}
-
-	bool Add(int key){
-		while (true) {
-			NODE* pred, * cur;
-			pred = &head;
-			cur = pred->next;
-			while (cur->key < key) {
-				pred = cur;
-				cur = cur->next;
-			}
-			pred->Lock();
-			cur->Lock();
-			while (validate(pred, cur)) {
-				if (cur->key == key && !cur->removed) {
-					pred->unLock();
-					cur->unLock();
-					return false;
-				}
-				else {
-					if (cur->removed) {
-						cur->removed = false;
-						pred->unLock();
-						cur->unLock();
-						return true;
-					}
-					NODE* node = new NODE(key);
-					node->next = cur;
-					atomic_thread_fence(memory_order_seq_cst);
-					pred->next = node;
-					pred->unLock();
-					cur->unLock();
-					return true;
-				}
-			}
-			pred->unLock();
-			cur->unLock();
+	bool Add(int key) {
+		NODE* pred, * cur;
+		pred = &head;
+		g_lock.lock();
+		cur = pred->next;
+		while (cur->key < key) {
+			pred = cur;
+			cur = cur->next;
+		}
+		if (cur->key == key) {
+			g_lock.unlock();
+			return false;
+		}
+		else {
+			NODE* node = new NODE(key);
+			node->next = cur;
+			pred->next = node;
+			g_lock.unlock();
+			return true;
 		}
 	}
 	bool Remove(int key) {
-		while (true) {
-			NODE* pred, * cur;
-			pred = &head;
-			cur = pred->next;
-			while (cur->key < key) {
-				pred = cur;
-				cur = cur->next;
-			}
-			pred->Lock();
-			cur->Lock();
-			while (validate(pred, cur)) {
-				if (cur->key != key) {
-					pred->unLock();
-					cur->unLock();
-					return false;
-				}
-				else {
-					cur->removed = true;
-					atomic_thread_fence(memory_order_seq_cst);
-					pred->next = cur->next;
-					pred->unLock();
-					cur->unLock();
-					return true;
-				}
-			}
-			pred->unLock();
-			cur->unLock();
+		NODE* pred, * cur;
+		pred = &head;
+		g_lock.lock();
+		cur = pred->next;
+		while (cur->key < key) {
+			pred = cur;
+			cur = cur->next;
+		}
+		if (cur->key != key) {
+			g_lock.unlock();
+			return false;
+		}
+		else {
+			pred->next = cur->next;
+			delete cur;
+			g_lock.unlock();
+			return true;
 		}
 	}
 	bool Contains(int key) {
-		NODE* curr = &head;
-		while (curr->key < key) {
-			curr = curr->next;
+		NODE* cur;
+		g_lock.lock_shared();
+		cur = head.next;
+		while (cur->key < key) {
+			cur = cur->next;
 		}
-		return curr->key == key && !curr->removed;
+		if (cur->key != key) {
+			g_lock.unlock_shared();
+			return false;
+		}
+		else {
+			g_lock.unlock_shared();
+			return true;
+		}
 	}
 	void Verify() {
 		NODE* p = head.next;
@@ -150,19 +165,19 @@ public:
 	}
 };
 
-Z_SET myset;
+C_SET myset;
 void Benchmark(int num_threads) {
 	const int NUM_TEST = 4'000'000;
-	const int RANGE = 1000;
+	const int RANGE = 4000;
 
 	for (int i = 0; i < NUM_TEST / num_threads; ++i) {
 		int x = rand() % RANGE;
-		switch (rand() % 3) {
+		switch (rand() % 100) {
 		case 0: myset.Add(x);
 			break;
 		case 1: myset.Remove(x);
 			break;
-		case 2: myset.Contains(x);
+		default: myset.Contains(x);
 			break;
 		}
 	}
